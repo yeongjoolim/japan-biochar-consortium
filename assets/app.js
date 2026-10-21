@@ -1,9 +1,9 @@
 /* Japan Biochar Consortium – site renderer (no build step, no server needed) */
-(function () {
+window.JBC_BOOT = function (SITE) {
   "use strict";
 
   /* ---------- data ---------- */
-  let DATA = window.SITE_CONTENT;
+  let DATA = SITE;
   // 관리 화면의 [미리보기]에서 열면 저장 전 초안을 보여줌
   try {
     if (/[?&]preview=1/.test(location.search)) {
@@ -326,7 +326,7 @@
           <div><h4>Menu</h4><ul><li><a href="#/">${t("home")}</a></li><li><a href="#/groups">${t("groups")}</a></li><li><a href="#/symposium">${t("symposium")}</a></li><li><a href="#/articles">${t("articles")}</a></li></ul></div>
           <div><h4>${t("contact")}</h4><ul><li><a href="mailto:${esc(S.email)}">${esc(S.email)}</a></li></ul></div>
         </div>
-        <div class="bottom"><span>© ${new Date().getFullYear()} ${esc(L(S.name))}</span><span>${t("footerNote")}</span></div>
+        <div class="bottom"><span>© ${new Date().getFullYear()} ${esc(L(S.name))}</span><span>${t("footerNote")} · <a href="#logout" onclick="try{localStorage.removeItem('jbc-unlock');sessionStorage.removeItem('jbc-unlock')}catch(e){};location.hash='logout';location.reload();return false">${lang==="ja"?"ログアウト":"Log out"}</a></span></div>
       </div></footer>`;
     document.documentElement.lang = lang;
     document.querySelectorAll(".lang button").forEach((b) => {
@@ -364,4 +364,4 @@
   window.addEventListener("hashchange", route);
   window.addEventListener("scroll", () => { const h = $("#hdr"); if (h) h.classList.toggle("scrolled", scrollY > 8); });
   shell(); route();
-})();
+};
