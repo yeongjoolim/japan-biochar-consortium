@@ -33,6 +33,7 @@ header button,header .btn{background:#2f2c25;border-color:#3c382f;color:#fff}hea
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--char);color:#fff;padding:10px 18px;border-radius:999px;opacity:0;transition:.25s;pointer-events:none}.toast.show{opacity:1}
 .linkrow{display:grid;grid-template-columns:1fr 1fr 1.4fr auto;gap:6px;margin-bottom:6px}@media(max-width:700px){.linkrow{grid-template-columns:1fr}}
 .linkrow input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:20;padding:16px}.modal form{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:380px;display:flex;flex-direction:column;gap:10px}.modal h3{margin:0}.modal input{border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit}.modal .err{color:#b3261e;font-size:13px;min-height:1em}
 .help{background:#fff8ee;border:1px solid #f1d9bf;border-radius:12px;padding:12px 16px;margin:14px 20px 0;font-size:13px}
 </style>
 </head>
@@ -40,11 +41,11 @@ header button,header .btn{background:#2f2c25;border-color:#3c382f;color:#fff}hea
 <header>
   <b>JBC 콘텐츠 관리</b>
   <a class="btn" href="index.html?preview=1" target="_blank">미리보기 ↗</a>
-  <button id="importBtn">content.js 불러오기</button>
-  <button class="pri" id="exportBtn">content.js 내보내기 ⬇</button>
+  <button id="importBtn">파일 불러오기</button>
+  <button class="pri" id="exportBtn">암호화해서 내보내기 (content.enc.js) ⬇</button>
   <input type="file" id="file" accept=".js,.json" hidden>
 </header>
-<div class="help">편집 내용은 이 브라우저에 자동으로 임시 저장됩니다. 사이트에 반영하려면 <b>[content.js 내보내기]</b>로 받은 파일을 사이트 폴더의 <code>content.js</code>에 덮어쓴 뒤 서버에 올려 주세요. 본문 서식: <code>## 소제목</code>, <code>- 목록</code>, <code>[글자](URL)</code>, <code>![설명](이미지URL)</code>, <code>**굵게**</code>. 빈 줄을 넣으면 문단이 나뉩니다.</div>
+<div class="help">편집 내용은 이 브라우저에 자동으로 임시 저장됩니다. 사이트에 반영하려면 <b>[암호화해서 내보내기]</b>에서 회원 비밀번호를 넣고 받은 <code>content.enc.js</code>를 GitHub 저장소에 올려(덮어쓰기) 주세요. 이때 넣은 비밀번호가 사이트 접속 비밀번호가 됩니다. 본문 서식: <code>## 소제목</code>, <code>- 목록</code>, <code>[글자](URL)</code>, <code>![설명](이미지URL)</code>, <code>**굵게**</code>. 빈 줄을 넣으면 문단이 나뉩니다.</div>
 <div class="tabs" id="tabs">
   <button data-t="posts" class="on">기사 (記事)</button>
   <button data-t="symposia">심포지엄</button>
@@ -57,12 +58,14 @@ header button,header .btn{background:#2f2c25;border-color:#3c382f;color:#fff}hea
 </div>
 <div class="toast" id="toast"></div>
 <script src="content.js"></script>
+<script src="content.enc.js"></script>
+<script src="assets/crypto.js"></script>
 <script>
 (function(){
   const KEY="jbc-admin-draft";
   let D; try{ D = JSON.parse(localStorage.getItem(KEY)||"null"); }catch(e){}
   const fresh = !D;
-  if(!D) D = JSON.parse(JSON.stringify(window.SITE_CONTENT));
+  if(!D && window.SITE_CONTENT) D = JSON.parse(JSON.stringify(window.SITE_CONTENT));
   let tab="posts", sel=null, filter="";
   const $=s=>document.querySelector(s);
   const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -149,15 +152,39 @@ header button,header .btn{background:#2f2c25;border-color:#3c382f;color:#fff}hea
   function setPath(o,path,v){const ks=path.split(".");let c=o;for(let i=0;i<ks.length-1;i++){if(c[ks[i]]==null||typeof c[ks[i]]!=="object")c[ks[i]]={};c=c[ks[i]]}c[ks[ks.length-1]]=v}
 
   $("#tabs").onclick=e=>{const b=e.target.closest("button");if(!b)return;tab=b.dataset.t;sel=null;filter="";document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x===b));renderList();renderEd()};
-  $("#exportBtn").onclick=()=>{
-    const txt="/* Japan Biochar Consortium – 사이트 콘텐츠 (admin.html에서 내보냄 "+new Date().toLocaleString()+") */\nwindow.SITE_CONTENT = "+JSON.stringify(D,null,2)+";\n";
-    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/javascript"}));a.download="content.js";a.click();toast("content.js를 내려받았습니다");
+  // 비밀번호 입력창 (confirm=true면 두 번 입력)
+  function askPw(title,desc,confirm){return new Promise(res=>{
+    const m=document.createElement("div");m.className="modal";
+    m.innerHTML=`<form><h3>${title}</h3><div style="color:var(--muted);font-size:13px">${desc}</div><input type="password" id="p1" placeholder="비밀번호" autocomplete="new-password" required>${confirm?'<input type="password" id="p2" placeholder="비밀번호 확인" autocomplete="new-password" required>':""}<div class="err" id="perr"></div><div class="bar"><button type="button" id="pc">취소</button><button class="pri" type="submit">확인</button></div></form>`;
+    document.body.appendChild(m);m.querySelector("#p1").focus();
+    m.querySelector("#pc").onclick=()=>{m.remove();res(null)};
+    m.querySelector("form").onsubmit=e=>{e.preventDefault();const a=m.querySelector("#p1").value;
+      if(confirm){if(a.length<8){m.querySelector("#perr").textContent="8자 이상으로 정해 주세요.";return}if(a!==m.querySelector("#p2").value){m.querySelector("#perr").textContent="두 비밀번호가 다릅니다.";return}}
+      m.remove();res(a)};
+  })}
+  $("#exportBtn").onclick=async()=>{
+    const pw=await askPw("회원 비밀번호 설정","이 비밀번호로 콘텐츠를 암호화합니다. 사이트 접속 비밀번호가 되며, 잊으면 복구할 수 없으니 따로 보관해 주세요.",true);
+    if(!pw)return;
+    const pack=await JBCCrypto.encrypt(D,pw);
+    const txt="/* Japan Biochar Consortium – 암호화된 사이트 콘텐츠 ("+new Date().toLocaleString()+"). 직접 편집하지 말고 admin.html을 사용하세요. */\nwindow.SITE_ENC = "+JSON.stringify(pack)+";\n";
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/javascript"}));a.download="content.enc.js";a.click();toast("content.enc.js를 내려받았습니다");
   };
   $("#importBtn").onclick=()=>$("#file").click();
   $("#file").onchange=async e=>{const f=e.target.files[0];if(!f)return;const s=await f.text();
-    try{const j=JSON.parse(s.slice(s.indexOf("{"),s.lastIndexOf("}")+1));if(!j.posts)throw 0;D=j;save();sel=null;renderList();renderEd();toast("불러왔습니다")}catch(err){alert("content.js 형식을 읽을 수 없습니다.")}};
-  if(!fresh) setTimeout(()=>toast("이전에 편집하던 초안을 불러왔습니다"),300);
-  renderList();renderEd();
+    try{let j=JSON.parse(s.slice(s.indexOf("{"),s.lastIndexOf("}")+1));
+      if(j.data&&j.salt){const pw=await askPw("비밀번호 입력","암호화된 파일입니다. 회원 비밀번호를 입력하세요.");if(!pw)return;try{j=(await JBCCrypto.decrypt(j,pw)).data}catch(x){alert("비밀번호가 다릅니다.");return}}
+      if(!j.posts)throw 0;D=j;save();sel=null;renderList();renderEd();toast("불러왔습니다")}catch(err){alert("파일 형식을 읽을 수 없습니다.")}};
+  async function init(){
+    if(!D && window.SITE_ENC){
+      while(!D){const pw=await askPw("비밀번호 입력","사이트에 올라가 있는 암호화된 콘텐츠를 불러옵니다. 회원 비밀번호를 입력하세요.");
+        if(pw===null){D={site:{name:{ja:"",en:""},tagline:{ja:"",en:""},intro:{ja:"",en:""},email:"",stats:[]},categories:[],posts:[],symposia:[]};break}
+        try{D=(await JBCCrypto.decrypt(window.SITE_ENC,pw)).data;save()}catch(x){alert("비밀번호가 다릅니다.")}}
+    }
+    if(!D) D={site:{name:{ja:"",en:""},tagline:{ja:"",en:""},intro:{ja:"",en:""},email:"",stats:[]},categories:[],posts:[],symposia:[]};
+    if(!fresh) setTimeout(()=>toast("이전에 편집하던 초안을 불러왔습니다"),300);
+    renderList();renderEd();
+  }
+  init();
 })();
 </script>
 </body>
